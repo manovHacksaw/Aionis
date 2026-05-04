@@ -1,11 +1,13 @@
 # 03 — System Architecture
 
 ```
-Version: v1.0
+Version: v2.0
 Last Updated: 2026-04-25
 Changes:
-- Initial draft. Covers component map, stability classification, data flow,
-  write consistency model, extension points, and Phase 1 limitations.
+- Phase 3 modules added: work/, external/. Module map updated.
+  strategy/dataFetch.ts and tasks/http.ts added to module list and stability table.
+  Data flow updated to include real work dispatch and coordinator confirmation step.
+  Component dependency graph updated.
 ```
 
 ---
@@ -35,7 +37,7 @@ src/
 │
 ├── routes/
 │   ├── agent.ts              HTTP control plane. Holds in-memory runners map (Phase 1 limitation).
-│   └── tasks.ts              HTTP task endpoint. Serves tasks to agents using ApiTaskSource.
+│   └── tasks.ts              HTTP task endpoint. Serves DynamicTaskSource for inspection.
 │
 ├── agent/
 │   ├── create.ts             Agent creation and retrieval (DB read/write).
@@ -48,14 +50,24 @@ src/
 │
 ├── strategy/
 │   ├── registry.ts           [REPLACEABLE] Maps task type strings to executor functions.
-│   ├── bounty.ts             Bounty strategy implementation.
-│   └── dataResale.ts         Data resale strategy (stub — Phase 2).
+│   ├── bounty.ts             Legacy bounty strategy (simulated work). Dev/testing only.
+│   ├── dataResale.ts         Data resale strategy (stub).
+│   └── dataFetch.ts          [Phase 3] Real work executor: CoinGecko → coordinator confirm → earn.
 │
 ├── tasks/
 │   ├── source.ts             TaskSource interface definition.
-│   ├── mock.ts               Fixed-cost/revenue task source (unit testing, local dev).
-│   ├── dynamic.ts            [REPLACEABLE] Probabilistic task simulator (Phase 1–2 default).
-│   └── api.ts                HTTP-backed task source (Phase 3 target).
+│   ├── mock.ts               Fixed-cost/revenue task source (unit testing).
+│   ├── dynamic.ts            [REPLACEABLE] Probabilistic simulator. Active when TASK_SOURCE=dynamic.
+│   ├── api.ts                Basic HTTP task source (Phase 2 prep, retained).
+│   └── http.ts               [Phase 3, REPLACEABLE] Validated HttpTaskSource. Active when TASK_SOURCE=http.
+│
+├── work/
+│   ├── types.ts              WorkResult discriminated union (WorkSuccess | WorkFailure).
+│   └── handlers.ts           [Phase 3] CoinGecko API work handlers. Dispatches by task.type.
+│
+├── external/
+│   ├── coordinator.ts        [Phase 3] Mock coordinator. Serves tasks, confirms completion.
+│   └── confirm.ts            [Phase 3] Payment confirmation client. Classifies infra vs prediction failure.
 │
 ├── outcomes/
 │   └── record.ts             Best-effort write to task_outcomes + cache invalidation.
@@ -174,12 +186,16 @@ evaluateProfit(task: Task, confidence: number): ProfitEvaluation
       → balance.spend(agentId, task.cost, metadata)
          → Postgres: record_spend RPC (atomic)
       → performWork(task)
-         → [Phase 1–2: simulated delay + 10% failure rate]
-         → [Phase 3: real data acquisition]
-      → On success:
-         balance.earn(agentId, task.revenue, metadata)
-         → Postgres: record_earn RPC (atomic)
-      → On infrastructure failure:
+         → [TASK_SOURCE=dynamic + bounty type: simulated delay + 10% failure]
+         → [TASK_SOURCE=http + Phase 3 types: real CoinGecko API call]
+         → Returns WorkResult: { success: true, data } | { success: false, kind, reason }
+      → If WorkResult.success, call POST /external/tasks/:id/complete
+         → If confirmed: true:
+              balance.earn(agentId, revenue, metadata)
+              → Postgres: record_earn RPC (atomic)
+         → If confirmed: false (prediction failure):
+              absorb cost — no earn, no refund
+      → If WorkResult or confirm failure (infrastructure):
          balance.earn(agentId, task.cost, { type: 'cost_refund' })
          → Postgres: record_earn RPC (atomic)
 
@@ -233,22 +249,28 @@ Analytics write fails → logs warning → loop continues
 
 ```
 index.ts
-  └── routes/agent.ts
-        └── agent/runner.ts
-              ├── engine/profit.ts          (no deps)
-              ├── engine/confidence.ts      → config/supabase.ts
-              ├── engine/balance.ts         → config/supabase.ts
-              ├── strategy/registry.ts
-              │     ├── strategy/bounty.ts
-              │     │     ├── engine/balance.ts
-              │     │     └── outcomes/record.ts → config/supabase.ts
-              │     │                          → engine/confidence.ts (cache invalidation)
-              │     └── strategy/dataResale.ts  (same deps as bounty.ts)
-              ├── tasks/dynamic.ts          (no external deps)
-              └── agent/create.ts           → config/supabase.ts
-                                            → wallet/solana.ts
-                                            → crypto/keys.ts
-                                            → config/env.ts
+  ├── routes/agent.ts
+  │     └── agent/runner.ts
+  │           ├── engine/profit.ts          (no deps)
+  │           ├── engine/confidence.ts      → config/supabase.ts
+  │           ├── engine/balance.ts         → config/supabase.ts
+  │           ├── strategy/registry.ts
+  │           │     ├── strategy/bounty.ts
+  │           │     │     ├── engine/balance.ts
+  │           │     │     └── outcomes/record.ts → config/supabase.ts
+  │           │     │                          → engine/confidence.ts (cache invalidation)
+  │           │     ├── strategy/dataResale.ts   (same deps as bounty.ts)
+  │           │     └── strategy/dataFetch.ts    [Phase 3]
+  │           │           ├── engine/balance.ts
+  │           │           ├── outcomes/record.ts
+  │           │           ├── work/handlers.ts   → CoinGecko API (external HTTP)
+  │           │           └── external/confirm.ts → coordinator (external HTTP)
+  │           ├── tasks/dynamic.ts          (no external deps) [TASK_SOURCE=dynamic]
+  │           └── tasks/http.ts             → coordinator HTTP [TASK_SOURCE=http]
+  │
+  ├── routes/tasks.ts → tasks/dynamic.ts
+  ├── external/coordinator.ts               (in-process mock, no external deps)
+  └── agent/create.ts → config/supabase.ts → wallet/solana.ts → crypto/keys.ts
 ```
 
 **Key observations:**
@@ -256,6 +278,8 @@ index.ts
 - `engine/profit.ts` has zero dependencies. It is the most stable module in the system.
 - `engine/balance.ts` depends only on `config/supabase.ts`. If the DB layer changes, only this module changes.
 - `outcomes/record.ts` calls `invalidateCache` from `engine/confidence.ts`. This is the only cross-engine coupling.
+- `strategy/dataFetch.ts` makes two external HTTP calls per task: one to CoinGecko (work), one to the coordinator (confirmation). Both are classified independently for failure routing.
+- `external/coordinator.ts` has no external deps. In production, it is replaced by a real service; only `COORDINATOR_URL` changes.
 
 ---
 

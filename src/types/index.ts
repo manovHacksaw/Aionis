@@ -1,6 +1,16 @@
 export type AgentStatus    = 'active' | 'paused' | 'terminated';
 export type TransactionType = 'spend' | 'earn' | 'resale';
-export type StrategyType   = 'bounty' | 'data_resale';
+export type StrategyType   =
+  | 'bounty'
+  | 'data_resale'
+  | 'fetch_sol_usdc_price'
+  | 'fetch_eth_usdc_price'
+  | 'fetch_btc_dominance'
+  | 'deep_orderbook_analysis'
+  | 'find_cheapest_flight'
+  | 'track_flight_price'
+  | 'find_best_price'
+  | 'track_price_drop';
 
 export interface Agent {
   id:                    string;

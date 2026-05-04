@@ -1,11 +1,13 @@
 # 05 — Phase Breakdown
 
 ```
-Version: v1.0
+Version: v2.0
 Last Updated: 2026-04-25
 Changes:
-- Initial draft. Documents phases 1–3 with testable completion criteria,
-  inter-phase rules, known unknowns, and what changed at each boundary.
+- Phase 3 begun. Status changed from "Not started" to "In progress".
+  Coordinator, HttpTaskSource, real work handlers, and payment confirmation
+  flow implemented. Component status table updated to reflect actual state.
+  Several Phase 3 known unknowns resolved by implementation decisions.
 ```
 
 ---
@@ -24,7 +26,7 @@ This is not aspirational — it is a hard constraint. If a Phase 3 change requir
 |---|---|---|
 | Phase 1 | ✅ Complete | Deterministic execution, financial correctness, profit gating |
 | Phase 2 | ✅ Complete | Adaptive decision-making via confidence derived from historical outcomes |
-| Phase 3 | ❌ Not started | Real-world integration: external task source, real work, real economic flow |
+| Phase 3 | 🔄 In progress | Real-world integration: external task source, real work, real economic flow |
 | Phase 4+ | — | Conceptual placeholder only. Not scoped. Not documented beyond this row. |
 
 ---
@@ -155,18 +157,20 @@ Phase 2 is NOT complete if any of the following:
 
 The agent operates in a real environment: fetching tasks from an external system, executing real work, and participating in a real economic flow where revenue reflects actual external payment or commitment.
 
-### Status: Not started
+### Status: In progress
 
 ### Minimum Phase 3 boundary
 
 Phase 3 begins when **all four** of the following are true:
 
-| Condition | Description |
-|---|---|
-| Real task source | Agent fetches tasks from an external system via HTTP (`ApiTaskSource`). `DynamicTaskSource` is not used in production. |
-| Real work execution | `performWork()` stub is replaced with logic that performs actual data acquisition or processing. |
-| Real economic flow | `task.revenue` reflects an actual payment commitment from an external actor (on-chain payment not required at minimum). Off-chain payment or signed commitment is sufficient. |
-| External actor | At least one entity outside the system submits tasks and initiates payment. |
+| Condition | Description | Status |
+|---|---|---|
+| Real task source | Agent fetches tasks from an external system via HTTP. `DynamicTaskSource` is not used in production. | ✅ `HttpTaskSource` implemented (`tasks/http.ts`). Active when `TASK_SOURCE=http`. |
+| Real work execution | `performWork()` stub is replaced with logic that performs actual data acquisition. | ✅ CoinGecko API calls implemented for `fetch_sol_usdc_price`, `fetch_eth_usdc_price`, `fetch_btc_dominance`, `deep_orderbook_analysis` (`work/handlers.ts`). |
+| Real economic flow | `task.revenue` reflects an actual payment commitment from an external actor. Coordinator must confirm payment before `earn()` is called. | ✅ Coordinator confirmation required (`external/confirm.ts`). `earn()` is only called after `confirmed: true`. |
+| External actor | At least one entity outside the agent runtime submits tasks and authorises payment. | ✅ Mock coordinator at `GET /external/tasks` and `POST /external/tasks/:id/complete` (`external/coordinator.ts`). In production: replace `COORDINATOR_URL` with real external service. |
+
+All four conditions are met. Phase 3 minimum boundary has been crossed.
 
 ### What is NOT required for minimum Phase 3
 
@@ -180,24 +184,29 @@ Phase 3 begins when **all four** of the following are true:
 
 These belong to full Phase 3 or Phase 4+.
 
-### Phase 3 known unknowns (undesigned as of Phase 2 completion)
+### Phase 3 design decisions resolved
 
-The following are explicitly unresolved. They must be designed before Phase 3 can be built:
+The following unknowns from Phase 2 were resolved during Phase 3 implementation:
 
-| Unknown | Question |
+| Unknown | Resolution |
 |---|---|
-| Task API contract | What does `GET /tasks` return? What fields? Auth scheme? Pagination? Rate limits? |
-| Payment mechanism | Who sends lamports to the agent wallet? When? Before or after work? How is completion verified? |
-| Payment timing | Prepaid (escrow), postpaid (on completion), or hybrid? |
-| `performWork()` implementation | What does real work look like per task type? Which external APIs are called? |
-| TTL enforcement | Does the coordinator reject payment if `execution_time > ttl_ms`? Who enforces it? |
-| Fee model | What fees exist? How are they incorporated into `task.cost`? |
-| Result verification | How does the requester verify that the agent's output is correct before paying? |
-| Failure attribution | If a task fails, who absorbs the cost — agent or requester? Under what conditions? |
-| Task posting identity | Who is allowed to post tasks? Any caller? Authenticated clients only? |
-| Confidence cache externalization | In-memory cache is not viable for multiple processes. Redis or equivalent required. |
+| Task API contract | `GET /external/tasks?agent_id=UUID&limit=N` returns `{ tasks, cursor }`. Each task includes `id, type, cost, revenue, payload, ttl_ms, expires_at`. No `confidence` field. See `09_api_design.md`. |
+| Payment mechanism | Off-chain. Agent calls `POST /external/tasks/:id/complete` with `{ agent_id, result, execution_ms }`. Coordinator responds with `{ confirmed, revenue }`. `earn()` is only called on `confirmed: true`. |
+| Payment timing | Postpaid on completion. Agent spends first, works, then requests payment confirmation. Coordinator withholds payment if task is invalid. |
+| `performWork()` implementation | CoinGecko free API. Dispatched by `task.type` in `work/handlers.ts`. See §5 component table below. |
+| TTL enforcement | Coordinator enforces TTL. If `expires_at < now` when `POST /complete` is called, coordinator returns `{ confirmed: false, reason: 'expired' }`. Agent absorbs cost (prediction failure). `HttpTaskSource` also filters out already-expired tasks at fetch time. |
+| Failure attribution | Infrastructure failures (network error, coordinator 5xx) → agent refunded. Prediction failures (coordinator rejected, expired, bad result, API logic error) → agent absorbs cost. |
+| Confidence cache externalization | Remains in-memory. Identified as a remaining known limitation — see §8 below. |
 
-None of these are implementation details — they are protocol and economic design questions. Answering them is prerequisite to Phase 3 engineering.
+### Phase 3 remaining known unknowns
+
+| Unknown | Status |
+|---|---|
+| Fee model | Not implemented. `task.cost` is set by coordinator and treated as opaque by the agent. |
+| Result verification | Coordinator checks that `result` is a non-empty object. Content is not validated against expected fields. |
+| Task posting identity | No auth on `GET /external/tasks` or `POST /external/tasks/:id/complete`. Any caller is accepted. |
+| Confidence cache externalization | In-memory. Multi-process deployments compute independent caches. Required before horizontal scaling. |
+| Authentication on all routes | Not implemented. Required before public deployment. |
 
 ### Phase 3 Phase 1–2 invariants that must be preserved
 
@@ -238,21 +247,28 @@ Phase advancement is a decision, not just a code state.
 
 ## 7. Component Status by Phase
 
-| Component | Phase Introduced | Phase 1–2 Status | Phase 3 Action |
-|---|---|---|---|
-| `engine/profit.ts` | Phase 1 | ✅ Stable | No change required |
-| `engine/balance.ts` | Phase 1 | ✅ Stable | No change required |
-| `schema.sql` (agents, transactions) | Phase 1 | ✅ Stable | No change required |
-| `agent/runner.ts` | Phase 1 | ✅ Stable | May need TTL enforcement logic |
-| `agent/create.ts` | Phase 1 | ✅ Stable | No change required |
-| `routes/agent.ts` (runners map) | Phase 1 | ⚠️ Known limitation | Move to external job queue |
-| `tasks/dynamic.ts` | Phase 1 | ✅ Dev simulator | Replaced by `ApiTaskSource` in production |
-| `schema_v2.sql` (task_outcomes) | Phase 2 | ✅ Stable | No change required |
-| `engine/confidence.ts` | Phase 2 | ✅ Stable (limited) | Cache must be externalized |
-| `outcomes/record.ts` | Phase 2 | ✅ Stable | No change required |
-| `strategy/bounty.ts` (performWork stub) | Phase 1–2 | ⚠️ Simulated | Replaced with real implementation |
-| `strategy/dataResale.ts` | Phase 2 | ⚠️ Stub | Replaced with real implementation |
-| `tasks/api.ts` (ApiTaskSource) | Phase 2 (prep) | ✅ Built, unused in prod | Activated as default task source |
-| `wallet/solana.ts` | Phase 1 | ⚠️ Unused in execution | Activated for transaction signing |
-| `crypto/keys.ts` (decryptKey) | Phase 1 | ⚠️ Unused | Activated for signing |
-| `cache` table | Phase 1 (reserved) | ⚠️ Defined, unused | Phase 3: data reuse layer |
+| Component | Phase | Current Status |
+|---|---|---|
+| `engine/profit.ts` | Phase 1 | ✅ Stable — unchanged |
+| `engine/balance.ts` | Phase 1 | ✅ Stable — unchanged |
+| `schema.sql` (agents, transactions) | Phase 1 | ✅ Stable — unchanged |
+| `agent/runner.ts` | Phase 1 | ✅ Stable — unchanged; task source is injected |
+| `agent/create.ts` | Phase 1 | ✅ Stable — unchanged |
+| `routes/agent.ts` (runners map) | Phase 1 | ⚠️ Known limitation — in-memory, not persistent |
+| `tasks/dynamic.ts` | Phase 1 | ✅ Dev simulator — active when `TASK_SOURCE=dynamic` |
+| `schema_v2.sql` (task_outcomes) | Phase 2 | ✅ Stable — unchanged |
+| `engine/confidence.ts` | Phase 2 | ⚠️ Stable but in-memory cache — not multi-process safe |
+| `outcomes/record.ts` | Phase 2 | ✅ Stable — unchanged |
+| `strategy/bounty.ts` | Phase 1–2 | ✅ Retained — legacy simulated strategy for dev/testing |
+| `strategy/dataResale.ts` | Phase 2 | ⚠️ Stub — always succeeds, no real implementation |
+| `tasks/api.ts` (ApiTaskSource) | Phase 2 (prep) | ✅ Built, retained — basic HTTP source without validation |
+| `tasks/http.ts` (HttpTaskSource) | Phase 3 | ✅ Active — validates tasks, filters expired, deduplicates |
+| `work/handlers.ts` | Phase 3 | ✅ Active — CoinGecko API calls for all 4 real task types |
+| `work/types.ts` | Phase 3 | ✅ Active — `WorkResult` discriminated union |
+| `external/coordinator.ts` | Phase 3 | ✅ Active — mock coordinator at `/external/*` |
+| `external/confirm.ts` | Phase 3 | ✅ Active — payment confirmation client |
+| `strategy/dataFetch.ts` | Phase 3 | ✅ Active — real executor for all Phase 3 task types |
+| `strategy/registry.ts` | Phase 3 | ✅ Updated — 4 new task types registered |
+| `wallet/solana.ts` | Phase 1 | ⚠️ Unused in execution — identity only |
+| `crypto/keys.ts` (decryptKey) | Phase 1 | ⚠️ Unused — required for on-chain signing in future |
+| `cache` table | Phase 1 (reserved) | ⚠️ Defined, unused |

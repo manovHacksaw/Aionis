@@ -1,10 +1,14 @@
 # 01 — System Overview
 
 ```
-Version: v1.0
+Version: v2.0
 Last Updated: 2026-04-25
 Changes:
-- Initial draft. Covers identity, what is built, what is not built, core loop, and economic guarantees.
+- Phase 3 begun. Updated work execution section to reflect real CoinGecko API handlers.
+  Updated task source table: HttpTaskSource now active when TASK_SOURCE=http.
+  Updated phase state table to reflect current implementation.
+  Added coordinator to core loop description.
+  Added payment confirmation step to economic guarantees.
 ```
 
 ---
@@ -62,38 +66,24 @@ The system is not a financial product. It is an execution runtime that manages t
 
 Work is defined as: **external data acquisition and/or transformation that has a measurable cost to perform**.
 
-### Current state (Phase 1–2)
+### Current state (Phase 3)
 
-`performWork()` in `src/strategy/bounty.ts` is a **simulated stub**:
+Real work is implemented in `src/work/handlers.ts` and dispatched by `task.type` via `performWork()`.
 
-```ts
-// Fake delay (200–800ms) + 10% random failure rate
-const delay = Math.min(200 + Math.floor(Math.random() * 800), task.ttl_ms - 50);
-await new Promise((r) => setTimeout(r, delay));
-if (Math.random() < 0.1) throw new Error(`Simulated execution failure for task ${task.id}`);
-```
+| Task Type | API | Endpoint | Output |
+|---|---|---|---|
+| `fetch_sol_usdc_price` | CoinGecko (free) | `/simple/price?ids=solana&vs_currencies=usd` | `{ price: number, symbol: "SOL/USDC" }` |
+| `fetch_eth_usdc_price` | CoinGecko (free) | `/simple/price?ids=ethereum&vs_currencies=usd` | `{ price: number, symbol: "ETH/USDC" }` |
+| `fetch_btc_dominance` | CoinGecko (free) | `/global` | `{ btc_dominance_pct: number }` |
+| `deep_orderbook_analysis` | CoinGecko via Binance tickers (free) | `/coins/solana/tickers?exchange_ids=binance&depth=true` | `{ pair, last_price, spread_pct, volume_24h, cost_to_move_up_usd, cost_to_move_down_usd }` |
 
-This is not real work. It exists to stress-test the economic and confidence engine under simulated success/failure rates.
+Work failures are classified as either `'infrastructure'` (rate limit, network error, server 5xx) or `'prediction'` (bad request, malformed response, wrong params). Infrastructure failures trigger a cost refund. Prediction failures result in cost absorption.
 
-### Phase 3+ real work types (planned)
+The legacy `performWork()` stub in `strategy/bounty.ts` (simulated delay + random failure) is **retained** for the `bounty` task type, which is used in development with `DynamicTaskSource`.
 
-| Work Type | Description |
-|---|---|
-| Data fetching | Pull price feeds, liquidity data, orderbook snapshots from external APIs |
-| Data processing | Normalize, aggregate, or structure raw fetched data |
-| Computation resale | Reuse previously computed results and sell them to a second consumer (see `src/strategy/dataResale.ts`) |
+### Computation resale
 
-Concrete task payloads already present in the simulator (intended to reflect real Phase 3 tasks):
-
-```
-fetch_sol_usdc_price
-fetch_eth_usdc_price
-fetch_btc_dominance
-deep_orderbook_analysis
-sol_mempool_snapshot
-```
-
-No source APIs or data providers are finalized. These are placeholders.
+`strategy/dataResale.ts` is a stub that always succeeds. Real implementation (caching fetched results and reselling to a second requester) is not yet built.
 
 ### Who pays the agent
 
@@ -111,13 +101,13 @@ Tasks are the inputs to the agent loop. The source of tasks changes by phase.
 
 | Phase | Task Source | Mechanism |
 |---|---|---|
-| 1–2 (current) | `DynamicTaskSource` | Local in-process simulator. Tasks are generated from hardcoded templates with random variance and availability probability. No external I/O. |
-| 3 (target) | External HTTP API | Agent polls `GET /tasks` at each loop iteration. Centralized endpoint. |
+| 1–2 | `DynamicTaskSource` | Local in-process simulator. Tasks generated from hardcoded templates with random variance and availability probability. No external I/O. Active when `TASK_SOURCE=dynamic`. |
+| 3 (current) | `HttpTaskSource` | Polls `GET /external/tasks?agent_id=UUID` from external coordinator. Validates each task, filters expired tasks, deduplicates within a single response. Active when `TASK_SOURCE=http`. |
 | 4+ (optional) | Queue-based or on-chain registry | Redis/SQS or on-chain task registry. Not designed yet. |
 
-The Phase 3 API endpoint is **not yet built**. The interface contract (request shape, auth, pagination) is TBD.
+`DynamicTaskSource` is retained for development. It is not a mock of the real coordinator — it is a self-contained simulator that produces structurally identical tasks.
 
-`DynamicTaskSource` is not a mock of a real system — it is a **development simulator** that exists so the agent runtime and confidence engine can be validated without external dependencies.
+The current coordinator at `GET /external/tasks` is a **mock** (in-process, at `src/external/coordinator.ts`). In production, set `COORDINATOR_URL` to a real external service.
 
 ---
 
@@ -130,11 +120,18 @@ Each iteration:
 ```
 1. Read agent record from DB          → verify status = 'active', read balance
 2. Fetch tasks from task source       → list of Task objects
+   [Phase 3: HttpTaskSource calls GET /external/tasks from coordinator]
 3. For each task:
    a. Affordability gate              → skip if task.cost > agent.balance
    b. Confidence computation          → computeConfidence(agentId, taskType)
    c. Profit gate                     → evaluateProfit(task, confidence)
-   d. If profitable: execute strategy → spend → work → earn or refund
+   d. If profitable: execute strategy:
+        spend()                       → debit cost atomically
+        performWork(task)             → call real external API [Phase 3]
+        POST /external/tasks/:id/complete → request payment confirmation [Phase 3]
+        If confirmed: earn(revenue)   → credit revenue atomically
+        If infra failure: earn(cost, cost_refund) → refund cost
+        If prediction failure: absorb cost
    e. Record outcome                  → task_outcomes table
 4. If 0 tasks executed: exponential backoff (base: 2s, max: 30s)
 5. If ≥ 1 task executed: reset backoff, wait pollIntervalMs (2s default)
@@ -264,7 +261,7 @@ This balance is set at creation time by the operator. It is not derived from any
 
 ## 11. Current Phase State
 
-The current codebase is a **blend of Phase 1 and Phase 2**. Both are functionally complete.
+The codebase implements Phase 1, Phase 2, and Phase 3 (minimum boundary).
 
 | Component | Phase | Status |
 |---|---|---|
@@ -272,14 +269,14 @@ The current codebase is a **blend of Phase 1 and Phase 2**. Both are functionall
 | Profit gate (`engine/profit.ts`) | Phase 1 | ✅ Complete |
 | Execution loop (`agent/runner.ts`) | Phase 1 | ✅ Complete |
 | Atomic DB functions (`schema.sql`) | Phase 1 | ✅ Complete |
-| `task_outcomes` table (`schema_v2.sql`) | Phase 2 | ✅ Schema exists |
+| `task_outcomes` table (`schema_v2.sql`) | Phase 2 | ✅ Complete |
 | Confidence engine (`engine/confidence.ts`) | Phase 2 | ✅ Complete |
 | Outcome recorder (`outcomes/record.ts`) | Phase 2 | ✅ Complete |
-| Real task source | Phase 3 | ❌ Not started |
-| Real work execution | Phase 3 | ❌ Not started |
-| Real payment integration | Phase 3 | ❌ Not started |
-
-Phase 3 is not started. Phase 3 requires external integrations (data APIs, payment coordinator) that do not exist yet.
+| Real task source (`tasks/http.ts`) | Phase 3 | ✅ Implemented |
+| Real work execution (`work/handlers.ts`) | Phase 3 | ✅ Implemented (CoinGecko) |
+| Payment confirmation (`external/confirm.ts`) | Phase 3 | ✅ Implemented |
+| External coordinator (`external/coordinator.ts`) | Phase 3 | ✅ Implemented (mock) |
+| Phase 3 strategy (`strategy/dataFetch.ts`) | Phase 3 | ✅ Implemented |
 
 ---
 

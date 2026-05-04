@@ -1,7 +1,10 @@
 import { Router, type Request, type Response } from 'express';
 import { createAgent, getAgent } from '../agent/create';
 import { AgentRunner } from '../agent/runner';
+import { HttpTaskSource } from '../tasks/http';
+import { DynamicTaskSource } from '../tasks/dynamic';
 import { supabase } from '../config/supabase';
+import { env } from '../config/env';
 
 export const agentRouter = Router();
 
@@ -71,7 +74,11 @@ agentRouter.post('/:id/run', async (req: Request, res: Response) => {
     return;
   }
 
-  const runner = new AgentRunner(id);
+  const taskSource = env.taskSource === 'http'
+    ? new HttpTaskSource(env.coordinatorUrl)
+    : new DynamicTaskSource();
+
+  const runner = new AgentRunner(id, { taskSource });
   runners.set(id, runner);
 
   // Fire-and-forget: the loop runs independently of the HTTP request lifecycle.

@@ -1,11 +1,11 @@
 # 09 — API Design
 
 ```
-Version: v1.0
+Version: v2.0
 Last Updated: 2026-04-25
 Changes:
-- Initial draft. Covers all current endpoints, request/response schemas,
-  error format, idempotency, versioning status, and Phase 3 planned changes.
+- Phase 3: added GET /external/tasks and POST /external/tasks/:id/complete (coordinator API).
+  Updated idempotency table. Updated Phase 3 API changes section.
 ```
 
 ---
@@ -264,6 +264,117 @@ Results are non-deterministic (probabilistic availability, random variance on co
 
 ---
 
+---
+
+### `GET /external/tasks`
+
+Coordinator task feed. Returns available tasks for an agent to evaluate and execute.
+
+**Source:** `src/external/coordinator.ts`. This is the mock coordinator. In production, `COORDINATOR_URL` points to an external real coordinator that implements the same contract.
+
+**Query params:**
+
+| Param | Type | Required | Default | Max |
+|---|---|---|---|---|
+| `agent_id` | `string` (UUID) | Yes | — | — |
+| `limit` | `integer` | No | `5` | `10` |
+| `cursor` | `string` | No | — | Pagination (not yet implemented; always `null` in response) |
+
+**Response 200:**
+```json
+{
+  "tasks": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "type": "fetch_sol_usdc_price",
+      "cost": 1020000,
+      "revenue": 3150000,
+      "payload": { "symbol": "SOL", "vs_currency": "usd", "source": "coingecko" },
+      "ttl_ms": 10000,
+      "expires_at": "2026-04-25T12:00:10.000Z"
+    }
+  ],
+  "cursor": null
+}
+```
+
+**Invariants enforced by the coordinator:**
+- `cost` and `revenue` are positive integers (lamports, `±10%` / `±20%` variance from template base values)
+- `expires_at` is always in the future relative to the time of the request
+- No `confidence` field on any task or payload
+- Task IDs are unique UUIDs; the same ID will not appear in two consecutive responses unless the pool has not replenished
+
+**Response 400:**
+```json
+{ "error": "agent_id is required" }
+```
+
+**Notes:** The coordinator replenishes the task pool on every request. Expired uncompleted tasks are evicted. Pool sizes per task type: `fetch_sol_usdc_price` (3), `fetch_eth_usdc_price` (3), `fetch_btc_dominance` (2), `deep_orderbook_analysis` (1).
+
+---
+
+### `POST /external/tasks/:id/complete`
+
+Payment confirmation. Called by the agent after completing work. Coordinator validates the completion and confirms or rejects payment.
+
+**Source:** `src/external/coordinator.ts`.
+
+**Path params:**
+- `id`: UUID of the task being completed
+
+**Request body:**
+```json
+{
+  "agent_id":     "agent-uuid",
+  "result":       { "price": 145.32, "symbol": "SOL/USDC", "source": "coingecko" },
+  "execution_ms": 234
+}
+```
+
+| Field | Type | Required | Constraint |
+|---|---|---|---|
+| `agent_id` | `string` | Yes | Any non-empty string |
+| `result` | `object` | Yes | Must be a non-empty object (at least one key) |
+| `execution_ms` | `number` | No | Not validated — informational |
+
+**Response 200 (confirmed):**
+```json
+{ "confirmed": true, "task_id": "uuid", "revenue": 3150000 }
+```
+
+`revenue` is the exact lamport amount the agent should call `earn()` with. It matches the `revenue` field from when the task was served.
+
+**Response 200 (rejected):**
+```json
+{ "confirmed": false, "task_id": "uuid", "reason": "expired" }
+```
+
+| `reason` value | Meaning | Agent action |
+|---|---|---|
+| `expired` | `expires_at < now` when complete was called | Absorb cost (prediction failure) |
+| `already_completed` | Another agent or a duplicate call completed this task first | Absorb cost (prediction failure) |
+| `invalid_result` | `result` is missing or empty | Absorb cost (prediction failure) |
+
+**Response 400:**
+```json
+{ "error": "agent_id is required" }
+```
+
+**Response 404:**
+```json
+{ "error": "task_not_found" }
+```
+
+**Idempotency:** NOT idempotent. The first call that reaches `confirmed: true` marks the task as completed. All subsequent calls for the same task ID return `{ confirmed: false, reason: 'already_completed' }`.
+
+**Agent behavior contract (from `strategy/dataFetch.ts`):**
+- Agent calls `spend()` before calling this endpoint
+- Agent calls `earn(revenue)` only if `confirmed: true`
+- If coordinator is unreachable or returns 5xx → infrastructure failure → `earn(cost, cost_refund)`
+- If coordinator returns 404 or `confirmed: false` → prediction failure → absorb cost
+
+---
+
 ## 3. Error Response Format
 
 **Current format (Phase 1–2):**
@@ -300,6 +411,8 @@ This format is **temporary**. It will be replaced in Phase 3 with a structured f
 | `POST /agent/:id/stop` | ❌ No | Returns 404 if not running |
 | `GET /agent` | ✅ Yes | Read-only (in-memory) |
 | `GET /tasks` | ❌ No | Non-deterministic output |
+| `GET /external/tasks` | ❌ No | Non-deterministic; pool replenishes on every call |
+| `POST /external/tasks/:id/complete` | ❌ No | First success claims; subsequent calls return rejected |
 
 ---
 

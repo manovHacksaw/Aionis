@@ -1,11 +1,11 @@
 # 06 — Tech Stack
 
 ```
-Version: v1.0
+Version: v1.1
 Last Updated: 2026-04-25
 Changes:
-- Initial draft. Covers runtime, dependencies, tool choices with rationale,
-  missing tooling, and dependency philosophy.
+- Added Phase 3 environment variables: TASK_SOURCE, COORDINATOR_URL.
+  No new runtime dependencies added. All Phase 3 work uses Node.js built-in fetch.
 ```
 
 ---
@@ -73,6 +73,20 @@ IV:          96-bit, randomly generated per encryption (never reused)
 Auth tag:    128-bit, stored with ciphertext
 Format:      <iv_b64url>:<authTag_b64url>:<ciphertext_b64url>
 ```
+
+---
+
+## 3.5. External HTTP APIs (Phase 3)
+
+Phase 3 makes live HTTP calls to external APIs. No new packages are used — all requests use the Node.js built-in `fetch` (available since Node 18+).
+
+| API | Used for | Auth |
+|---|---|---|
+| CoinGecko v3 (`https://api.coingecko.com/api/v3`) | Price feeds, BTC dominance, Binance ticker/orderbook data | None (free tier, no key required) |
+
+**Rate limit consideration:** CoinGecko free tier allows approximately 10–30 requests/minute. The agent loop will hit this limit if many agents run simultaneously or loop frequency is high. Rate limit responses (`HTTP 429`) are classified as infrastructure failures — the agent refunds the cost and applies exponential backoff at the runner level.
+
+**No COINGECKO_API_KEY env var is defined.** If the free tier is insufficient, a key can be added to the request headers in `work/handlers.ts`.
 
 ---
 
