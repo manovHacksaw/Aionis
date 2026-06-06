@@ -255,14 +255,14 @@ export default function DashboardPage() {
                     <p className="text-xs text-white/40">Portfolio growth of Aetherius Trading vs QuickSwap benchmark</p>
                   </div>
 
-                  <div className="flex items-center gap-5 text-xs">
+                  <div className="flex items-center gap-7 text-xs">
                     <div className="flex items-center gap-2">
-                      <span className="w-3 h-0.5 bg-[#ff7850]" />
-                      <span className="text-white/85">Aetherius Portfolio Growth</span>
+                      <span className="w-4 h-0.5 bg-[#ff7850]" />
+                      <span className="text-white/80">Aetherius Portfolio Growth</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="w-3 h-0.5 border-t border-dashed border-white/40" />
-                      <span className="text-white/40">Benchmark Return</span>
+                      <span className="w-4 h-0.5 border-t border-dashed border-white/35" />
+                      <span className="text-white/45">Benchmark Return</span>
                     </div>
                   </div>
                 </div>
@@ -326,9 +326,9 @@ export default function DashboardPage() {
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-                className="bg-white/[0.02] border border-white/[0.08] rounded-[20px] p-6 space-y-4"
+                className="bg-white/[0.02] border border-white/[0.08] rounded-[22px] p-8 space-y-5"
               >
-                <h3 className="text-base font-semibold text-white/95">Recent Copy Trades</h3>
+                <h3 className="text-lg font-semibold text-white">Recent Copy Trades</h3>
                 
                 <div className="overflow-x-auto">
                   <table className="w-full border-collapse text-left text-xs">
@@ -383,8 +383,8 @@ export default function DashboardPage() {
                 className="grid grid-cols-1 md:grid-cols-2 gap-6"
               >
                 {/* Left side: Historical performance table */}
-                <div className="bg-white/[0.02] border border-white/[0.08] rounded-[20px] p-6 space-y-4">
-                  <h3 className="text-base font-semibold text-white/95">Historical Monthly Performance</h3>
+                <div className="bg-white/[0.02] border border-white/[0.08] rounded-[22px] p-7 space-y-5">
+                  <h3 className="text-lg font-semibold text-white">Historical Monthly Performance</h3>
                   
                   <div className="space-y-3 font-mono text-xs">
                     {[
@@ -408,8 +408,8 @@ export default function DashboardPage() {
                 </div>
 
                 {/* Right side: Win/Loss breakdown & Risk metrics */}
-                <div className="bg-white/[0.02] border border-white/[0.08] rounded-[20px] p-6 space-y-6">
-                  <h3 className="text-base font-semibold text-white/95">Risk & Efficiency Metrics</h3>
+                <div className="bg-white/[0.02] border border-white/[0.08] rounded-[22px] p-7 space-y-6">
+                  <h3 className="text-lg font-semibold text-white">Risk & Efficiency Metrics</h3>
                   
                   {/* Gauge indicator: Win/Loss Ratio */}
                   <div className="flex items-center justify-between gap-6 pb-4 border-b border-white/[0.04]">
@@ -463,11 +463,11 @@ export default function DashboardPage() {
         </div>
 
         {/* ================= RIGHT COLUMN: STICKY SIDEBAR (3 COLUMNS) ================= */}
-        <div className="lg:col-span-3 space-y-4 lg:sticky lg:top-[96px]">
+        <div className="lg:col-span-3 space-y-5 lg:sticky lg:top-[96px]">
           
           {/* Card 1: Portfolio Summary */}
-          <div className="bg-white/[0.02] border border-white/[0.08] rounded-[20px] p-5 space-y-4">
-            <h3 className="text-xs font-semibold text-white/80 uppercase tracking-widest">Portfolio Summary</h3>
+          <div className="bg-white/[0.02] border border-white/[0.08] rounded-[22px] p-6 space-y-5">
+            <h3 className="text-xs font-semibold text-white/75 uppercase tracking-wider">Portfolio Summary</h3>
             
             <div className="space-y-3 font-mono text-xs">
               <div className="flex justify-between items-center py-1.5 border-b border-white/[0.04]">
@@ -486,8 +486,8 @@ export default function DashboardPage() {
           </div>
 
           {/* Card 2: Copy Trader Settings */}
-          <div className="bg-white/[0.02] border border-white/[0.08] rounded-[20px] p-5 space-y-5">
-            <h3 className="text-xs font-semibold text-white/80 uppercase tracking-widest">Copy Settings</h3>
+          <div className="bg-white/[0.02] border border-white/[0.08] rounded-[22px] p-6 space-y-5">
+            <h3 className="text-xs font-semibold text-white/75 uppercase tracking-wider">Copy Settings</h3>
             
             {/* Allocation Slider */}
             <div className="space-y-2">
@@ -535,8 +535,8 @@ export default function DashboardPage() {
           </div>
 
           {/* Card 3: Quick Actions */}
-          <div className="bg-white/[0.02] border border-white/[0.08] rounded-[20px] p-5 space-y-3">
-            <h3 className="text-xs font-semibold text-white/80 uppercase tracking-widest">Quick Actions</h3>
+          <div className="bg-white/[0.02] border border-white/[0.08] rounded-[22px] p-6 space-y-4">
+            <h3 className="text-xs font-semibold text-white/75 uppercase tracking-wider">Quick Actions</h3>
             
             {/* Primary Action: Start Copying (orange-to-red gradient CTA) */}
             <button
