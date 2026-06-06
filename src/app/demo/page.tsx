@@ -1,10 +1,6 @@
 'use client';
+import ConnectButton from '@/components/ConnectButton';
 
-import dynamic from 'next/dynamic';
-const DynamicWidget = dynamic(
-  () => import('@dynamic-labs/sdk-react-core').then((m) => m.DynamicWidget),
-  { ssr: false }
-);
 import { useAccount, useWriteContract, useBalance } from 'wagmi';
 import { somniaTestnet } from '@/config/chains';
 import { useState, useEffect } from 'react';
@@ -228,7 +224,7 @@ export default function Home() {
               <p style={{ color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
                 Connect your wallet to update the greeting on-chain.
               </p>
-              <DynamicWidget />
+              <ConnectButton />
             </div>
           )}
 

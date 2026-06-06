@@ -3,12 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState, useEffect, useRef } from 'react';
-import dynamic from 'next/dynamic';
-
-const DynamicWidget = dynamic(
-  () => import('@dynamic-labs/sdk-react-core').then((m) => m.DynamicWidget),
-  { ssr: false }
-);
+import ConnectButton from '@/components/ConnectButton';
 
 export default function Navbar() {
   const pathname = usePathname();
@@ -112,7 +107,7 @@ export default function Navbar() {
             <span>+</span> Launch App
           </Link>
         ) : (
-          <DynamicWidget />
+          <ConnectButton />
         )}
       </div>
     </>

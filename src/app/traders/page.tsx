@@ -1,10 +1,6 @@
 'use client';
+import ConnectButton from '@/components/ConnectButton';
 
-import dynamic from 'next/dynamic';
-const DynamicWidget = dynamic(
-  () => import('@dynamic-labs/sdk-react-core').then((m) => m.DynamicWidget),
-  { ssr: false }
-);
 import Link                from 'next/link';
 import { useState, useEffect, useCallback } from 'react';
 
@@ -103,7 +99,7 @@ export default function TradersPage() {
           <Link href="/"          style={{ color:'var(--text-secondary)', textDecoration:'none', fontSize:'0.9rem' }}>Home</Link>
           <Link href="/traders"   style={{ color:'var(--text-primary)',   textDecoration:'none', fontSize:'0.9rem', fontWeight:700 }}>Traders</Link>
           <Link href="/portfolio" style={{ color:'var(--text-secondary)', textDecoration:'none', fontSize:'0.9rem' }}>Portfolio</Link>
-          <DynamicWidget />
+          <ConnectButton />
         </nav>
       </header>
 
