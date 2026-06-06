@@ -1,6 +1,10 @@
 'use client';
 
-import { ConnectButton }       from '@rainbow-me/rainbowkit';
+import dynamic from 'next/dynamic';
+const DynamicWidget = dynamic(
+  () => import('@dynamic-labs/sdk-react-core').then((m) => m.DynamicWidget),
+  { ssr: false }
+);
 import { useAccount }          from 'wagmi';
 import Link                    from 'next/link';
 import { useState, useEffect } from 'react';
@@ -102,7 +106,7 @@ export default function PortfolioPage() {
             <p style={{ color: 'var(--text-secondary)', fontSize: '1.1rem', marginBottom: '1.5rem' }}>
               Connect your wallet to view your virtual portfolio.
             </p>
-            <ConnectButton />
+            <DynamicWidget />
           </div>
         ) : loading && !portfolio ? (
           <div style={{ textAlign: 'center', padding: '4rem', color: 'var(--text-secondary)' }}>

@@ -4,8 +4,8 @@ import Providers from "@/components/Providers";
 import Navbar from "@/components/Navbar";
 
 export const metadata: Metadata = {
-  title: "Somnia Shannon Testnet | Developer Hub",
-  description: "Compile, deploy, and interact with smart contracts on the high-performance Somnia Testnet using Privy and Hardhat.",
+  title: "Aionis | Copy Trading on Somnia",
+  description: "Follow top traders and automatically copy their moves on Somnia.",
 };
 
 export default function RootLayout({
