@@ -14,6 +14,30 @@ import * as Contracts from ".";
 declare module "hardhat/types/runtime" {
   interface HardhatEthersHelpers extends HardhatEthersHelpersBase {
     getContractFactory(
+      name: "IERC1155Errors",
+      signerOrOptions?: ethers.Signer | FactoryOptions
+    ): Promise<Contracts.IERC1155Errors__factory>;
+    getContractFactory(
+      name: "IERC20Errors",
+      signerOrOptions?: ethers.Signer | FactoryOptions
+    ): Promise<Contracts.IERC20Errors__factory>;
+    getContractFactory(
+      name: "IERC721Errors",
+      signerOrOptions?: ethers.Signer | FactoryOptions
+    ): Promise<Contracts.IERC721Errors__factory>;
+    getContractFactory(
+      name: "ERC20",
+      signerOrOptions?: ethers.Signer | FactoryOptions
+    ): Promise<Contracts.ERC20__factory>;
+    getContractFactory(
+      name: "IERC20Metadata",
+      signerOrOptions?: ethers.Signer | FactoryOptions
+    ): Promise<Contracts.IERC20Metadata__factory>;
+    getContractFactory(
+      name: "IERC20",
+      signerOrOptions?: ethers.Signer | FactoryOptions
+    ): Promise<Contracts.IERC20__factory>;
+    getContractFactory(
       name: "AionisAgentManager",
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.AionisAgentManager__factory>;
@@ -30,6 +54,14 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.ISomniaAgentPlatform__factory>;
     getContractFactory(
+      name: "AUSD",
+      signerOrOptions?: ethers.Signer | FactoryOptions
+    ): Promise<Contracts.AUSD__factory>;
+    getContractFactory(
+      name: "AUSDC",
+      signerOrOptions?: ethers.Signer | FactoryOptions
+    ): Promise<Contracts.AUSDC__factory>;
+    getContractFactory(
       name: "FollowerRegistry",
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.FollowerRegistry__factory>;
@@ -37,23 +69,37 @@ declare module "hardhat/types/runtime" {
       name: "SomniaGreeting",
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.SomniaGreeting__factory>;
-    getContractFactory(
-      name: "IAlgebraRouter",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.IAlgebraRouter__factory>;
-    getContractFactory(
-      name: "IERC20",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.IERC20__factory>;
-    getContractFactory(
-      name: "ISomniaAgentPlatform",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.ISomniaAgentPlatform__factory>;
-    getContractFactory(
-      name: "StellalphaAgentManager",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.StellalphaAgentManager__factory>;
 
+    getContractAt(
+      name: "IERC1155Errors",
+      address: string | ethers.Addressable,
+      signer?: ethers.Signer
+    ): Promise<Contracts.IERC1155Errors>;
+    getContractAt(
+      name: "IERC20Errors",
+      address: string | ethers.Addressable,
+      signer?: ethers.Signer
+    ): Promise<Contracts.IERC20Errors>;
+    getContractAt(
+      name: "IERC721Errors",
+      address: string | ethers.Addressable,
+      signer?: ethers.Signer
+    ): Promise<Contracts.IERC721Errors>;
+    getContractAt(
+      name: "ERC20",
+      address: string | ethers.Addressable,
+      signer?: ethers.Signer
+    ): Promise<Contracts.ERC20>;
+    getContractAt(
+      name: "IERC20Metadata",
+      address: string | ethers.Addressable,
+      signer?: ethers.Signer
+    ): Promise<Contracts.IERC20Metadata>;
+    getContractAt(
+      name: "IERC20",
+      address: string | ethers.Addressable,
+      signer?: ethers.Signer
+    ): Promise<Contracts.IERC20>;
     getContractAt(
       name: "AionisAgentManager",
       address: string | ethers.Addressable,
@@ -75,6 +121,16 @@ declare module "hardhat/types/runtime" {
       signer?: ethers.Signer
     ): Promise<Contracts.ISomniaAgentPlatform>;
     getContractAt(
+      name: "AUSD",
+      address: string | ethers.Addressable,
+      signer?: ethers.Signer
+    ): Promise<Contracts.AUSD>;
+    getContractAt(
+      name: "AUSDC",
+      address: string | ethers.Addressable,
+      signer?: ethers.Signer
+    ): Promise<Contracts.AUSDC>;
+    getContractAt(
       name: "FollowerRegistry",
       address: string | ethers.Addressable,
       signer?: ethers.Signer
@@ -84,27 +140,31 @@ declare module "hardhat/types/runtime" {
       address: string | ethers.Addressable,
       signer?: ethers.Signer
     ): Promise<Contracts.SomniaGreeting>;
-    getContractAt(
-      name: "IAlgebraRouter",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.IAlgebraRouter>;
-    getContractAt(
-      name: "IERC20",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.IERC20>;
-    getContractAt(
-      name: "ISomniaAgentPlatform",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.ISomniaAgentPlatform>;
-    getContractAt(
-      name: "StellalphaAgentManager",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.StellalphaAgentManager>;
 
+    deployContract(
+      name: "IERC1155Errors",
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.IERC1155Errors>;
+    deployContract(
+      name: "IERC20Errors",
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.IERC20Errors>;
+    deployContract(
+      name: "IERC721Errors",
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.IERC721Errors>;
+    deployContract(
+      name: "ERC20",
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.ERC20>;
+    deployContract(
+      name: "IERC20Metadata",
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.IERC20Metadata>;
+    deployContract(
+      name: "IERC20",
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.IERC20>;
     deployContract(
       name: "AionisAgentManager",
       signerOrOptions?: ethers.Signer | DeployContractOptions
@@ -122,6 +182,14 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.ISomniaAgentPlatform>;
     deployContract(
+      name: "AUSD",
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.AUSD>;
+    deployContract(
+      name: "AUSDC",
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.AUSDC>;
+    deployContract(
       name: "FollowerRegistry",
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.FollowerRegistry>;
@@ -129,23 +197,37 @@ declare module "hardhat/types/runtime" {
       name: "SomniaGreeting",
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.SomniaGreeting>;
+
     deployContract(
-      name: "IAlgebraRouter",
+      name: "IERC1155Errors",
+      args: any[],
       signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.IAlgebraRouter>;
+    ): Promise<Contracts.IERC1155Errors>;
+    deployContract(
+      name: "IERC20Errors",
+      args: any[],
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.IERC20Errors>;
+    deployContract(
+      name: "IERC721Errors",
+      args: any[],
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.IERC721Errors>;
+    deployContract(
+      name: "ERC20",
+      args: any[],
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.ERC20>;
+    deployContract(
+      name: "IERC20Metadata",
+      args: any[],
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.IERC20Metadata>;
     deployContract(
       name: "IERC20",
+      args: any[],
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.IERC20>;
-    deployContract(
-      name: "ISomniaAgentPlatform",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.ISomniaAgentPlatform>;
-    deployContract(
-      name: "StellalphaAgentManager",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.StellalphaAgentManager>;
-
     deployContract(
       name: "AionisAgentManager",
       args: any[],
@@ -167,6 +249,16 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.ISomniaAgentPlatform>;
     deployContract(
+      name: "AUSD",
+      args: any[],
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.AUSD>;
+    deployContract(
+      name: "AUSDC",
+      args: any[],
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.AUSDC>;
+    deployContract(
       name: "FollowerRegistry",
       args: any[],
       signerOrOptions?: ethers.Signer | DeployContractOptions
@@ -176,26 +268,6 @@ declare module "hardhat/types/runtime" {
       args: any[],
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.SomniaGreeting>;
-    deployContract(
-      name: "IAlgebraRouter",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.IAlgebraRouter>;
-    deployContract(
-      name: "IERC20",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.IERC20>;
-    deployContract(
-      name: "ISomniaAgentPlatform",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.ISomniaAgentPlatform>;
-    deployContract(
-      name: "StellalphaAgentManager",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.StellalphaAgentManager>;
 
     // default types
     getContractFactory(

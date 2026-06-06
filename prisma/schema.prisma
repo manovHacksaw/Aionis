@@ -63,3 +63,53 @@ model PaperTrade {
 
   @@map("paper_trades")
 }
+
+// ── New on-chain vault system ─────────────────────────────────────────────────
+
+model UserVault {
+  id             String     @id @default(uuid())
+  follower       String
+  leader         String
+  ausdcLocked    Decimal    @map("ausdc_locked")     @db.Decimal(20, 6)
+  riskLevel      Int        @map("risk_level")
+  maxPerTradePct Int        @map("max_per_trade_pct")
+  allowlistJson  Json       @default("[]")           @map("allowlist_json")
+  status         String     @default("ACTIVE")
+  onChainVaultId String?    @map("on_chain_vault_id")
+  createdAt      DateTime   @default(now())          @map("created_at")
+  positions      Position[]
+
+  @@unique([follower, leader])
+  @@index([follower])
+  @@index([leader])
+  @@map("user_vaults")
+}
+
+model Position {
+  id             String     @id @default(uuid())
+  follower       String
+  leader         String
+  vaultId        String     @map("vault_id")
+  ausdcAllocated Decimal    @map("ausdc_allocated") @db.Decimal(20, 6)
+  entryPrice     Decimal    @map("entry_price")     @db.Decimal(20, 10)
+  exitPrice      Decimal?   @map("exit_price")      @db.Decimal(20, 10)
+  pnl            Decimal?   @db.Decimal(20, 6)
+  status         String     @default("OPEN")
+  openedAt       DateTime   @map("opened_at")
+  closedAt       DateTime?  @map("closed_at")
+  txHashOpen     String?    @map("tx_hash_open")
+  txHashClose    String?    @map("tx_hash_close")
+  vault          UserVault  @relation(fields: [vaultId], references: [id])
+
+  @@index([follower, status])
+  @@index([leader, status])
+  @@map("positions")
+}
+
+model TokenPrice {
+  token     String   @id
+  price     Decimal  @db.Decimal(20, 10)
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("token_prices")
+}
