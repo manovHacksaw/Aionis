@@ -15,20 +15,79 @@ export const somniaMainnet = defineChain({
   },
 });
 
-// ── Addresses (all Somnia Mainnet) ────────────────────────────────────────────
+// ── Tokens (Somnia Mainnet) ───────────────────────────────────────────────────
 
-export const ADDRESSES = {
-  algebraFactory:   '0x0ccff3D02A3a200263eC4e0Fdb5E60a56721B8Ae' as `0x${string}`,
-  swapRouter:       '0x1582f6f3D26658F7208A799Be46e34b1f366CE44' as `0x${string}`,
-  wsomi:            '0x046EDe9564A72571df6F5e44d0405360c0f4dCab' as `0x${string}`,
-  usdce:            '0x28BEc7E30E6faee657a03e19Bf1128AaD7632A00' as `0x${string}`,
-  wsomiUsdcePool:   '0xe5467Be8B8Db6B074904134E8C1a581F5565E2c3' as `0x${string}`,
+export const TOKENS = {
+  WSOMI: { address: '0x046EDe9564A72571df6F5e44d0405360c0f4dCab' as `0x${string}`, symbol: 'WSOMI', decimals: 18, isStable: false  },
+  USDCE: { address: '0x28BEc7E30E6faee657a03e19Bf1128AaD7632A00' as `0x${string}`, symbol: 'USDC.e', decimals: 6,  isStable: true   },
+  NIA:   { address: '0xC063B29CD6B30885783B505aE180B3079e0A2154' as `0x${string}`, symbol: 'NIA',    decimals: 18, isStable: false  },
+  USDT:  { address: '0x67B302E35Aef5EEE8c32D934F5856869EF428330' as `0x${string}`, symbol: 'USDT',  decimals: 6,  isStable: true   },
 } as const;
 
-// token0 = WSOMI (18 dec, lower address), token1 = USDC.e (6 dec)
+export type TokenDef = typeof TOKENS[keyof typeof TOKENS];
+
+// ── Pool definitions ──────────────────────────────────────────────────────────
+
+export interface PoolDef {
+  address:  `0x${string}`;
+  token0:   TokenDef;
+  token1:   TokenDef;
+  // Symbol of the non-stable "base" token for this pool (used for BUY/SELL labelling)
+  baseSymbol: string;
+}
+
+export const POOLS: PoolDef[] = [
+  {
+    address:    '0xe5467Be8B8Db6B074904134E8C1a581F5565E2c3',
+    token0:     TOKENS.WSOMI,
+    token1:     TOKENS.USDCE,
+    baseSymbol: 'WSOMI',
+  },
+  {
+    address:    '0xb1a5a70A946667655bF14512599D06ACCa020F62',
+    token0:     TOKENS.WSOMI,
+    token1:     TOKENS.USDCE,
+    baseSymbol: 'WSOMI',
+  },
+  {
+    address:    '0x89b6827843b884B862489C2FC526374D0F9F1c39',
+    token0:     TOKENS.USDCE,
+    token1:     TOKENS.NIA,
+    baseSymbol: 'NIA',
+  },
+  {
+    address:    '0xb29713414Fd01604A3B4267b0D6df67dFa9E151b',
+    token0:     TOKENS.WSOMI,
+    token1:     TOKENS.NIA,
+    baseSymbol: 'NIA',
+  },
+  {
+    address:    '0x6594c878AB49266bA03A3131D89B9515F02A412f',
+    token0:     TOKENS.USDCE,
+    token1:     TOKENS.USDT,
+    baseSymbol: 'USDT',
+  },
+  {
+    address:    '0x6b3D46a456D04E51d138E22888B4EF9eb2266F42',
+    token0:     TOKENS.WSOMI,
+    token1:     TOKENS.USDT,
+    baseSymbol: 'USDT',
+  },
+];
+
+// Kept for backwards-compat with copy-engine (still targets WSOMI/USDC.e)
+export const ADDRESSES = {
+  algebraFactory: '0x0ccff3D02A3a200263eC4e0Fdb5E60a56721B8Ae' as `0x${string}`,
+  swapRouter:     '0x1582f6f3D26658F7208A799Be46e34b1f366CE44' as `0x${string}`,
+  wsomi:          TOKENS.WSOMI.address,
+  usdce:          TOKENS.USDCE.address,
+  wsomiUsdcePool: '0xe5467Be8B8Db6B074904134E8C1a581F5565E2c3' as `0x${string}`,
+} as const;
+
+// Kept for copy-engine backwards-compat
 export const POOL = {
-  token0: { address: ADDRESSES.wsomi, decimals: 18, symbol: 'WSOMI' },
-  token1: { address: ADDRESSES.usdce, decimals: 6,  symbol: 'USDC.e' },
+  token0: TOKENS.WSOMI,
+  token1: TOKENS.USDCE,
 } as const;
 
 // ── Copy-trade config ─────────────────────────────────────────────────────────

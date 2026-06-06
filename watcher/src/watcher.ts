@@ -3,7 +3,7 @@ import { ALGEBRA_SWAP_ABI }           from './price.js';
 import { parseSwapLog }               from './parser.js';
 import { processTrade }               from './copy-engine.js';
 import { claimSwap }                  from './dedup.js';
-import { somniaMainnet, ADDRESSES }   from './config.js';
+import { somniaMainnet, POOLS, type PoolDef } from './config.js';
 import type { Db }                    from './db.js';
 
 function makeWsClient() {
@@ -31,6 +31,9 @@ async function refreshLeaders(db: Db) {
   console.log(`[watcher] Tracking ${trackedLeaders.size} leader(s)`);
 }
 
+// Cached WSOMI price — updated whenever a WSOMI pool swap is seen
+let wsomiPriceCache = 0;
+
 export async function startWatcher(db: Db): Promise<() => void> {
   await refreshLeaders(db);
   const refreshTimer = setInterval(() => refreshLeaders(db), 5 * 60 * 1000);
@@ -38,129 +41,108 @@ export async function startWatcher(db: Db): Promise<() => void> {
   const wsClient   = makeWsClient();
   const httpClient = makeHttpClient();
 
-  console.log('[watcher] Subscribing to WSOMI/USDC.e pool Swap events on Somnia Mainnet…');
+  console.log(`[watcher] Subscribing to ${POOLS.length} pool(s) on Somnia Mainnet…`);
+  POOLS.forEach((p) => console.log(`  ${p.token0.symbol}/${p.token1.symbol} ${p.address}`));
 
-  // ── Primary: WebSocket subscription ──────────────────────────────────────
-  const unwatch = wsClient.watchContractEvent({
-    address:   ADDRESSES.wsomiUsdcePool,
-    abi:       ALGEBRA_SWAP_ABI,
-    eventName: 'Swap',
+  // ── Per-pool handler ──────────────────────────────────────────────────────
 
-    onLogs: async (logs) => {
-      for (const log of logs) {
-        const recipient = (log.args.recipient as string).toLowerCase();
-        const txHash    = log.transactionHash ?? '0x';
+  async function handleLog(log: any, pool: PoolDef) {
+    const recipient = (log.args.recipient as string).toLowerCase();
+    const txHash    = log.transactionHash ?? '0x';
 
-        // Dedup for recording — use recipient (actual trader, not router)
-        const recordClaimed = await claimSwap(txHash + ':rec', recipient);
-        if (recordClaimed) {
-          const blockTime = await getBlockTime(httpClient, log.blockNumber ?? 0n);
-          const intent    = parseSwapLog({
-            sender:    log.args.sender    as `0x${string}`,
-            recipient: log.args.recipient as `0x${string}`,
-            amount0:   log.args.amount0   as bigint,
-            amount1:   log.args.amount1   as bigint,
-            price:     log.args.price     as bigint,
-            liquidity: log.args.liquidity as bigint,
-            tick:      log.args.tick      as number,
-            txHash:    txHash             as `0x${string}`,
-            blockTime,
-          });
+    const recordClaimed = await claimSwap(`${txHash}:${pool.address}:rec`, recipient);
+    if (!recordClaimed) return;
 
-          // Record ALL swaps from any trader for the leaderboard
-          await db.recordLeaderSwap({
-            leader:     recipient,
-            side:       intent.side,
-            tokenIn:    intent.tokenIn,
-            tokenOut:   intent.tokenOut,
-            usdValue:   intent.usdValue,
-            wsomiPrice: intent.wsomiPrice,
-            txHash,
-            timestamp:  intent.timestamp,
-          }).catch((e) => console.error('[watcher] recordLeaderSwap error:', e.message));
+    const blockTime = await getBlockTime(httpClient, log.blockNumber ?? 0n);
+    const intent    = parseSwapLog(
+      {
+        sender:    log.args.sender    as `0x${string}`,
+        recipient: log.args.recipient as `0x${string}`,
+        amount0:   log.args.amount0   as bigint,
+        amount1:   log.args.amount1   as bigint,
+        price:     log.args.price     as bigint,
+        liquidity: log.args.liquidity as bigint,
+        tick:      log.args.tick      as number,
+        txHash:    txHash             as `0x${string}`,
+        blockTime,
+      },
+      pool,
+      wsomiPriceCache,
+    );
 
-          console.log(
-            `[watcher] ${intent.side} ${recipient.slice(0, 8)}… ` +
-            `$${intent.usdValue.toFixed(2)} @ $${intent.wsomiPrice.toFixed(4)}`
-          );
+    // Keep WSOMI price cache fresh
+    if (intent.wsomiPrice > 0) wsomiPriceCache = intent.wsomiPrice;
 
-          // Run paper trades only for users who have explicitly followed this trader
-          if (trackedLeaders.has(recipient)) {
-            const claimed = await claimSwap(txHash, recipient);
-            if (claimed) {
-              await processTrade(intent, db).catch((e) =>
-                console.error('[watcher] processTrade error:', e.message)
-              );
-            }
-          }
-        }
+    await db.recordLeaderSwap({
+      leader:     recipient,
+      side:       intent.side,
+      tokenIn:    intent.tokenIn,
+      tokenOut:   intent.tokenOut,
+      usdValue:   intent.usdValue,
+      wsomiPrice: intent.wsomiPrice,
+      txHash,
+      timestamp:  intent.timestamp,
+    }).catch((e) => console.error('[watcher] recordLeaderSwap error:', e.message));
+
+    console.log(
+      `[${pool.token0.symbol}/${pool.token1.symbol}] ` +
+      `${intent.side} ${recipient.slice(0, 8)}… ` +
+      `$${intent.usdValue.toFixed(2)} @ wsomi=$${intent.wsomiPrice.toFixed(4)}`
+    );
+
+    if (trackedLeaders.has(recipient)) {
+      const claimed = await claimSwap(`${txHash}:${pool.address}`, recipient);
+      if (claimed) {
+        await processTrade(intent, db).catch((e) =>
+          console.error('[watcher] processTrade error:', e.message)
+        );
       }
-    },
+    }
+  }
 
-    onError: (e) => console.error('[watcher] WS error:', e.message),
-  });
+  // ── Primary: WebSocket subscriptions (one per pool) ───────────────────────
 
-  // ── Fallback: HTTP polling every 10s ──────────────────────────────────────
-  let lastBlock = 0n;
+  const unwatchers = POOLS.map((pool) =>
+    wsClient.watchContractEvent({
+      address:   pool.address,
+      abi:       ALGEBRA_SWAP_ABI,
+      eventName: 'Swap',
+      onLogs:    async (logs) => { for (const log of logs) await handleLog(log, pool); },
+      onError:   (e) => console.error(`[watcher:ws:${pool.token0.symbol}/${pool.token1.symbol}] ${e.message}`),
+    })
+  );
+
+  // ── Fallback: HTTP polling every 12s ─────────────────────────────────────
+
+  const lastBlocks = new Map<string, bigint>(POOLS.map((p) => [p.address, 0n]));
 
   const pollTimer = setInterval(async () => {
     try {
       const latest = await httpClient.getBlockNumber();
-      if (lastBlock === 0n) { lastBlock = latest - 1n; return; }
-      if (latest <= lastBlock) return;
 
-      const logs = await httpClient.getContractEvents({
-        address: ADDRESSES.wsomiUsdcePool,
-        abi:     ALGEBRA_SWAP_ABI,
-        eventName: 'Swap',
-        fromBlock: lastBlock + 1n,
-        toBlock:   latest,
-      });
+      for (const pool of POOLS) {
+        const lastBlock = lastBlocks.get(pool.address)!;
+        if (lastBlock === 0n) { lastBlocks.set(pool.address, latest - 1n); continue; }
+        if (latest <= lastBlock) continue;
 
-      for (const log of logs) {
-        const recipient = (log.args.recipient as string).toLowerCase();
-        const txHash    = log.transactionHash ?? '0x';
-
-        const recordClaimed = await claimSwap(txHash + ':rec', recipient);
-        if (!recordClaimed) continue;
-
-        const blockTime = await getBlockTime(httpClient, log.blockNumber ?? 0n);
-        const intent    = parseSwapLog({
-          sender:    log.args.sender    as `0x${string}`,
-          recipient: log.args.recipient as `0x${string}`,
-          amount0:   log.args.amount0   as bigint,
-          amount1:   log.args.amount1   as bigint,
-          price:     log.args.price     as bigint,
-          liquidity: log.args.liquidity as bigint,
-          tick:      log.args.tick      as number,
-          txHash:    txHash             as `0x${string}`,
-          blockTime,
+        const logs = await httpClient.getContractEvents({
+          address:   pool.address,
+          abi:       ALGEBRA_SWAP_ABI,
+          eventName: 'Swap',
+          fromBlock: lastBlock + 1n,
+          toBlock:   latest,
         });
 
-        await db.recordLeaderSwap({
-          leader: recipient, side: intent.side,
-          tokenIn: intent.tokenIn, tokenOut: intent.tokenOut,
-          usdValue: intent.usdValue, wsomiPrice: intent.wsomiPrice,
-          txHash, timestamp: intent.timestamp,
-        }).catch(() => {});
-
-        if (trackedLeaders.has(recipient)) {
-          const claimed = await claimSwap(txHash + ':poll', recipient);
-          if (claimed) {
-            await processTrade(intent, db).catch((e) =>
-              console.error('[watcher:poll] error:', e.message)
-            );
-          }
-        }
+        for (const log of logs) await handleLog(log, pool).catch(() => {});
+        lastBlocks.set(pool.address, latest);
       }
-      lastBlock = latest;
     } catch (e: any) {
       console.error('[watcher:poll] error:', e.message);
     }
-  }, 10_000);
+  }, 12_000);
 
   return () => {
-    unwatch();
+    unwatchers.forEach((u) => u());
     clearInterval(pollTimer);
     clearInterval(refreshTimer);
   };

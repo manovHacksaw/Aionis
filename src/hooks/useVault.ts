@@ -1,6 +1,6 @@
 'use client';
 
-import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
+import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt, usePublicClient } from 'wagmi';
 import { parseUnits, keccak256, encodePacked } from 'viem';
 import { useState } from 'react';
 import { useAUSD } from '@/hooks/useAUSD';
@@ -17,6 +17,7 @@ function computeVaultId(follower: `0x${string}`, leader: `0x${string}`) {
 export function useVault(leaderAddress?: `0x${string}`) {
   const { address: follower } = useAccount();
   const { writeContractAsync } = useWriteContract();
+  const publicClient = usePublicClient();
   const { approve, hasEnoughAllowance, refetch: refetchAUSD } = useAUSD();
 
   const [createTxHash,  setCreateTxHash]  = useState<`0x${string}` | undefined>();
@@ -123,12 +124,11 @@ export function useVault(leaderAddress?: `0x${string}`) {
   }) {
     if (!follower || !leaderAddress) throw new Error('wallet not connected');
 
-    // Step 1: approve if needed
+    // Step 1: approve if needed — must wait for receipt before createVault
     if (!hasEnoughAllowance(amountHuman)) {
-      const approveTx = await approve(amountHuman);
-      // Wait briefly — wagmi tracks this via useWaitForTransactionReceipt
-      // but we fire-and-continue since the next tx will queue anyway
-      console.log('approve tx:', approveTx);
+      const approveHash = await approve(amountHuman);
+      await publicClient!.waitForTransactionReceipt({ hash: approveHash });
+      refetchAUSD();
     }
 
     // Step 2: create vault on-chain
@@ -168,7 +168,10 @@ export function useVault(leaderAddress?: `0x${string}`) {
   // Add more aUSD to an existing vault (must approve first if needed)
   async function deposit(amountHuman: number) {
     if (!follower || !leaderAddress) throw new Error('wallet not connected');
-    if (!hasEnoughAllowance(amountHuman)) await approve(amountHuman);
+    if (!hasEnoughAllowance(amountHuman)) {
+      const h = await approve(amountHuman);
+      await publicClient!.waitForTransactionReceipt({ hash: h });
+    }
 
     const hash = await writeContractAsync({
       address:      VAULT_MANAGER,

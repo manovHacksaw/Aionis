@@ -1,26 +1,34 @@
-// src/app/(app)/vault/[leader]/page.tsx
 'use client';
 
 import * as React from 'react';
-import { useState, use } from 'react';
+import { useState, use, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { motion } from 'framer-motion';
+import { useAccount } from 'wagmi';
+import { usePrivy } from '@privy-io/react-auth';
+import { useAUSD } from '@/hooks/useAUSD';
+import { useVault } from '@/hooks/useVault';
 
-const MOCK_TRADERS = [
-  { address: "0xAb5801a7D398351b8bE11C439e05C5B3259aeC9B", roi: 42.3, winRate: 68, trades: 134, volume: 28400 },
-  { address: "0x1Db3439a222C519ab44bb1144fC28167b4Fa6EE6", roi: -8.1, winRate: 44, trades: 89, volume: 12100 },
-  { address: "0xCA35b7d915458EF540aDe6068dFe2F44E8fa733c", roi: 91.7, winRate: 74, trades: 201, volume: 67300 },
-  { address: "0x14723A09ACff6D2A60DcdF7aA4AFf308FDDC160C", roi: 19.2, winRate: 61, trades: 57, volume: 9800 },
-];
-
-const RISK_DESCRIPTIONS = {
-  1: "Very conservative · max 5% per trade",
-  2: "Conservative · max 10% per trade",
-  3: "Moderate · max 20% per trade",
-  4: "Aggressive · max 35% per trade",
-  5: "Max risk · up to 50% per trade",
+const RISK_DESCRIPTIONS: Record<number, string> = {
+  1: 'Very conservative · max 5% per trade',
+  2: 'Conservative · max 10% per trade',
+  3: 'Moderate · max 20% per trade',
+  4: 'Aggressive · max 35% per trade',
+  5: 'Max risk · up to 50% per trade',
 };
+
+const RISK_MAX_PCT: Record<number, number> = { 1: 5, 2: 10, 3: 20, 4: 35, 5: 50 };
+
+type LeaderStats = {
+  followerCount: number;
+  wsomiPrice:    number;
+  stats24h: { trades: number; volume: number; buys: number; sells: number };
+  lastSeen: string | null;
+};
+
+function fmt(addr: string) {
+  return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
+}
 
 interface PageProps {
   params: Promise<{ leader: string }> | { leader: string };
@@ -28,26 +36,31 @@ interface PageProps {
 
 export default function VaultPage({ params }: PageProps) {
   const router = useRouter();
-
-  // Unwrap params depending on whether it's a Promise (Next 15+) or plain object
   const resolvedParams = params instanceof Promise ? use(params) : params;
-  const leaderAddress = resolvedParams.leader;
+  const leaderAddress = resolvedParams.leader as `0x${string}`;
 
-  // Find trader data or fallback
-  const trader = MOCK_TRADERS.find(
-    (t) => t.address.toLowerCase() === leaderAddress.toLowerCase()
-  ) || { address: leaderAddress, roi: 0, winRate: 0, trades: 0, volume: 0 };
+  const { address, isConnected } = useAccount();
+  const { login } = usePrivy();
+  const { balance, canFaucet, cooldownSeconds, faucetPending, claimFaucet } = useAUSD();
+  const { createVault, createPending, vaultStatus } = useVault(leaderAddress);
 
-  // UI state
-  const [copied, setCopied] = useState(false);
-  const [amount, setAmount] = useState<string>('0');
-  const [riskLevel, setRiskLevel] = useState<number>(3);
-  const [allowedTokens, setAllowedTokens] = useState<Record<string, boolean>>({
-    WSOMI: true,
-    'USDC.e': true,
-    WETH: false,
-    WBTC: false,
+  const [stats,    setStats]    = useState<LeaderStats | null>(null);
+  const [statsErr, setStatsErr] = useState(false);
+  const [copied,   setCopied]   = useState(false);
+  const [amount,   setAmount]   = useState('');
+  const [riskLevel, setRiskLevel] = useState(3);
+  const [tokens, setTokens] = useState<Record<string, boolean>>({
+    WSOMI: true, 'USDC.e': true, WETH: false, WBTC: false,
   });
+  const [submitting, setSubmitting] = useState(false);
+  const [submitErr,  setSubmitErr]  = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch(`/api/traders/${leaderAddress}`)
+      .then((r) => r.json())
+      .then(setStats)
+      .catch(() => setStatsErr(true));
+  }, [leaderAddress]);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(leaderAddress);
@@ -55,76 +68,72 @@ export default function VaultPage({ params }: PageProps) {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleMax = () => {
-    setAmount('10000');
-  };
+  const toggleToken = (token: string) =>
+    setTokens((prev) => ({ ...prev, [token]: !prev[token] }));
 
-  const toggleToken = (token: string) => {
-    setAllowedTokens((prev) => ({
-      ...prev,
-      [token]: !prev[token],
-    }));
-  };
+  const selectedTokens = Object.entries(tokens).filter(([, v]) => v).map(([k]) => k);
+  const parsedAmount   = parseFloat(amount) || 0;
+  const canSubmit      = parsedAmount > 0 && parsedAmount <= balance && selectedTokens.length > 0 && isConnected;
 
-  const anyTokenSelected = Object.values(allowedTokens).some(Boolean);
-  const parsedAmount = parseFloat(amount) || 0;
-  const isSubmitDisabled = parsedAmount <= 0 || !anyTokenSelected;
-
-  const handleSubmit = (e: React.FormEvent) => {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (isSubmitDisabled) return;
-    alert(`Vault created successfully for leader ${formatAddress(leaderAddress)} with ${parsedAmount} aUSD!`);
-    router.push('/portfolio');
-  };
+    if (!canSubmit) return;
+    setSubmitting(true);
+    setSubmitErr(null);
+    try {
+      await createVault({
+        amountHuman:    parsedAmount,
+        riskLevel,
+        maxPerTradePct: RISK_MAX_PCT[riskLevel],
+        tokens:         selectedTokens,
+      });
+      router.push('/portfolio');
+    } catch (err: any) {
+      setSubmitErr(err?.shortMessage ?? err?.message ?? 'Transaction failed');
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
-  const formatAddress = (addr: string) => {
-    return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
-  };
+  async function handleFaucet() {
+    try { await claimFaucet(); } catch {}
+  }
+
+  const total24h    = (stats?.stats24h.buys ?? 0) + (stats?.stats24h.sells ?? 0);
+  const buyPct      = total24h > 0 ? Math.round((stats!.stats24h.buys / total24h) * 100) : 0;
+  const vol         = stats?.stats24h.volume ?? 0;
+  const volFmt      = vol >= 1000 ? `$${(vol / 1000).toFixed(1)}k` : `$${vol.toFixed(0)}`;
+
+  const cooldownMin = Math.ceil(cooldownSeconds / 60);
 
   return (
-    <div className="min-h-screen bg-black text-white px-6 md:px-16 py-12 max-w-6xl mx-auto w-full select-none">
-      {/* Back to Traders Link */}
+    <div className="min-h-screen bg-black text-white px-6 md:px-16 py-12 max-w-6xl mx-auto w-full select-none font-sans">
       <div className="mb-8">
-        <Link
-          href="/traders"
-          className="text-white/40 hover:text-white text-sm transition-colors flex items-center gap-2 w-fit"
-        >
+        <Link href="/traders" className="text-white/40 hover:text-white text-sm transition-colors flex items-center gap-2 w-fit">
           <span>←</span> Traders
         </Link>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+
         {/* Left: Leader Card */}
-        <div className="lg:col-span-5 space-y-6">
-          <div className="bg-white/[0.03] border border-white/[0.07] rounded-2xl p-6 relative">
-            {/* Copy address badge */}
+        <div className="lg:col-span-5 space-y-4">
+          <div className="bg-white/[0.03] border border-white/[0.07] rounded-2xl p-6">
             <div className="flex items-center justify-between mb-6">
               <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-full bg-gradient-to-br from-amber-500 to-orange-600 shadow-[0_0_12px_rgba(217,119,6,0.15)] flex-shrink-0" />
+                <div className="w-9 h-9 rounded-full bg-gradient-to-br from-amber-500 to-orange-600 flex-shrink-0" />
                 <div>
                   <div className="text-[10px] text-white/30 uppercase tracking-wide">Copying Leader</div>
                   <div
                     onClick={handleCopy}
-                    className="font-mono text-sm tracking-tight text-white/90 hover:text-white transition-colors cursor-pointer relative flex items-center gap-1.5"
+                    className="font-mono text-sm tracking-tight text-white/90 hover:text-white transition-colors cursor-pointer flex items-center gap-1.5 relative"
                   >
-                    <span>{formatAddress(leaderAddress)}</span>
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      strokeWidth="1.5"
-                      stroke="currentColor"
-                      className="w-4 h-4 text-white/40"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 0 1-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H5.25m11.9-3.664A2.251 2.251 0 0 0 15 2.25h-3a2.25 2.25 0 0 0-1.75 3.364M18.75 7.5V18a2.25 2.25 0 0 1-2.25 2.25H6.75A2.25 2.25 0 0 1 4.5 18V7.5M18.75 7.5V5.25A2.25 2.25 0 0 0 16.5 3h-9A2.25 2.25 0 0 0 5.25 5.25V7.5m13.5 0h-13.5"
-                      />
+                    <span>{fmt(leaderAddress)}</span>
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" className="w-3.5 h-3.5 text-white/40">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.75a1.125 1.125 0 0 1-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H5.25m11.9-3.664A2.251 2.251 0 0 0 15 2.25h-3a2.25 2.25 0 0 0-1.75 3.364M18.75 7.5V18a2.25 2.25 0 0 1-2.25 2.25H6.75A2.25 2.25 0 0 1 4.5 18V7.5M18.75 7.5V5.25A2.25 2.25 0 0 0 16.5 3h-9A2.25 2.25 0 0 0 5.25 5.25V7.5m13.5 0h-13.5" />
                     </svg>
-
                     {copied && (
-                      <span className="absolute -top-9 left-1/2 transform -translate-x-1/2 bg-[#d97706] text-white text-[10px] font-semibold tracking-wide uppercase px-2.5 py-1 rounded shadow-lg z-50">
+                      <span className="absolute -top-8 left-0 bg-amber-600 text-white text-[10px] font-medium tracking-wide uppercase px-2 py-0.5 rounded z-50">
                         Copied!
                       </span>
                     )}
@@ -133,170 +142,199 @@ export default function VaultPage({ params }: PageProps) {
               </div>
             </div>
 
-            {/* Stats Row */}
-            <div className="grid grid-cols-2 gap-4 mb-6 border-b border-white/[0.05] pb-6">
+            {/* Stats */}
+            <div className="grid grid-cols-2 gap-4 border-b border-white/[0.05] pb-6 mb-4">
               <div>
-                <div className="text-[10px] uppercase tracking-wider text-white/40 mb-1">30d ROI</div>
-                <div className={`text-xl font-medium ${trader.roi >= 0 ? 'text-[#d97706]' : 'text-[#ef4444]'}`}>
-                  {trader.roi >= 0 ? '+' : ''}{trader.roi}%
+                <div className="text-[10px] uppercase tracking-wider text-white/40 mb-1">24h Volume</div>
+                <div className="text-lg font-light text-white tabular-nums">
+                  {statsErr ? '—' : stats ? volFmt : <span className="text-white/20">…</span>}
                 </div>
               </div>
               <div>
-                <div className="text-[10px] uppercase tracking-wider text-white/40 mb-1">Win Rate</div>
-                <div className="text-xl font-medium text-white">{trader.winRate}%</div>
+                <div className="text-[10px] uppercase tracking-wider text-white/40 mb-1">24h Trades</div>
+                <div className="text-lg font-light text-white tabular-nums">
+                  {statsErr ? '—' : stats ? stats.stats24h.trades : <span className="text-white/20">…</span>}
+                </div>
               </div>
               <div>
-                <div className="text-[10px] uppercase tracking-wider text-white/40 mb-1">Trades</div>
-                <div className="text-xl font-medium text-white">{trader.trades}</div>
+                <div className="text-[10px] uppercase tracking-wider text-white/40 mb-1">Buy %</div>
+                <div className={`text-lg font-light tabular-nums ${!stats ? 'text-white/20' : buyPct >= 50 ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {statsErr ? '—' : stats ? `${buyPct}%` : '…'}
+                </div>
               </div>
               <div>
-                <div className="text-[10px] uppercase tracking-wider text-white/40 mb-1">Copied Volume</div>
-                <div className="text-xl font-medium text-white font-mono">${trader.volume.toLocaleString()}</div>
+                <div className="text-[10px] uppercase tracking-wider text-white/40 mb-1">Followers</div>
+                <div className="text-lg font-light text-white tabular-nums">
+                  {statsErr ? '—' : stats ? stats.followerCount : <span className="text-white/20">…</span>}
+                </div>
               </div>
             </div>
 
-            {/* Muted Leader Note */}
-            <p className="text-white/40 text-xs leading-relaxed">
-              This leader is selected based on transaction history and consistency on QuickSwap. Active copying utilizes low-latency mirroring scripts on the Somnia Testnet.
+            <p className="text-white/30 text-[11px] leading-relaxed">
+              Activity is recorded on Somnia Mainnet. Copying occurs on Somnia Testnet (chain 50312) using aUSD.
             </p>
           </div>
+
+          {/* aUSD Balance card */}
+          {isConnected && (
+            <div className="bg-white/[0.03] border border-white/[0.07] rounded-2xl px-5 py-4 flex items-center justify-between">
+              <div>
+                <p className="text-[10px] uppercase tracking-wider text-white/40 mb-1">aUSD Balance</p>
+                <p className="text-[17px] font-light tabular-nums text-white">
+                  {balance.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                  <span className="text-neutral-600 text-[13px] ml-1.5">aUSD</span>
+                </p>
+              </div>
+              <button
+                onClick={handleFaucet}
+                disabled={!canFaucet || faucetPending}
+                className={`rounded-full border text-[12px] px-4 py-1.5 transition-all duration-200 cursor-pointer ${
+                  canFaucet && !faucetPending
+                    ? 'border-white/[0.18] text-white/80 hover:text-white hover:border-white/30'
+                    : 'border-white/[0.07] text-white/30 cursor-not-allowed'
+                }`}
+              >
+                {faucetPending ? 'Claiming…' : canFaucet ? 'Faucet' : `${cooldownMin}m`}
+              </button>
+            </div>
+          )}
         </div>
 
-        {/* Right: Create Vault Panel */}
+        {/* Right: Create Vault Form */}
         <div className="lg:col-span-7">
+          {vaultStatus === 'ACTIVE' && (
+            <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl px-5 py-4 mb-4">
+              <p className="text-amber-400 text-[13px]">You already have an active vault for this leader.</p>
+              <button onClick={() => router.push('/portfolio')} className="text-amber-400/70 text-[12px] hover:text-amber-400 transition-colors mt-1 cursor-pointer">
+                View in Portfolio →
+              </button>
+            </div>
+          )}
+
           <form
             onSubmit={handleSubmit}
             className="bg-white/[0.03] border border-white/[0.07] rounded-2xl p-6 space-y-6"
           >
             <div>
-              <h2 className="text-xl font-medium text-white mb-1">Create Vault</h2>
-              <p className="text-white/40 text-xs">
+              <h2 className="text-[20px] font-light tracking-tight text-white mb-1">Create Vault</h2>
+              <p className="text-white/40 text-[12px]">
                 Lock aUSD to start copying this trader's moves automatically.
               </p>
             </div>
 
-            {/* Field 1: aUSD Amount */}
+            {/* aUSD Amount */}
             <div className="space-y-2">
               <div className="flex justify-between items-center">
-                <label className="text-xs font-medium text-white/60">aUSD Amount</label>
-                <span className="text-xs text-white/30">Available: 10,000 aUSD</span>
+                <label className="text-[12px] text-white/60">aUSD Amount</label>
+                <span className="text-[12px] text-white/30">
+                  Available: {balance.toLocaleString(undefined, { maximumFractionDigits: 2 })} aUSD
+                </span>
               </div>
               <div className="relative flex items-center">
                 <input
                   type="number"
                   min="0"
-                  max="10000"
                   step="any"
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
-                  className="w-full bg-white/[0.03] border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-white/30 transition-all font-mono"
+                  className="w-full bg-white/[0.03] border border-white/10 rounded-xl px-4 py-3 text-[13px] text-white focus:outline-none focus:border-white/30 transition-all font-mono"
                   placeholder="0.00"
                 />
                 <button
                   type="button"
-                  onClick={handleMax}
+                  onClick={() => setAmount(balance > 0 ? balance.toFixed(2) : '')}
                   className="absolute right-3 bg-white/10 hover:bg-white/20 text-white text-[10px] font-medium uppercase tracking-wider px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
                 >
                   Max
                 </button>
               </div>
-            </div>
-
-            {/* Field 2: Risk Level */}
-            <div className="space-y-3">
-              <label className="text-xs font-medium text-white/60 block">Risk Level</label>
-              <div className="flex gap-2">
-                {[1, 2, 3, 4, 5].map((level) => {
-                  const isSelected = riskLevel === level;
-                  return (
-                    <button
-                      type="button"
-                      key={level}
-                      onClick={() => setRiskLevel(level)}
-                      className={`flex-1 py-2.5 rounded-xl border text-sm font-medium transition-all duration-200 cursor-pointer ${
-                        isSelected
-                          ? 'bg-[#d97706]/20 border-[#d97706]/50 text-amber-400'
-                          : 'bg-white/[0.03] border-white/10 text-white/50 hover:border-white/20 hover:text-white'
-                      }`}
-                    >
-                      {level}
-                    </button>
-                  );
-                })}
-              </div>
-              <p className="text-[11px] text-[#d97706] tracking-wide mt-1">
-                {RISK_DESCRIPTIONS[riskLevel as keyof typeof RISK_DESCRIPTIONS]}
-              </p>
-            </div>
-
-            {/* Field 3: Token Allowlist */}
-            <div className="space-y-3 pt-2">
-              <div>
-                <label className="text-xs font-medium text-white/60 block">Allowed Tokens</label>
-                <p className="text-[10px] text-white/30">
-                  Select which tokens this vault will copy trades for
-                </p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                {['WSOMI', 'USDC.e', 'WETH', 'WBTC'].map((token) => (
-                  <label
-                    key={token}
-                    className="flex items-center gap-3 cursor-pointer group text-sm select-none"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={allowedTokens[token] || false}
-                      onChange={() => toggleToken(token)}
-                      className="sr-only"
-                    />
-                    <div
-                      className={`w-5 h-5 rounded border flex items-center justify-center transition-all ${
-                        allowedTokens[token]
-                          ? 'border-[#d97706] bg-[#d97706]/10 text-[#d97706]'
-                          : 'border-white/10 bg-white/[0.02] group-hover:border-white/30 text-transparent'
-                      }`}
-                    >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="3"
-                        className="w-3.5 h-3.5"
-                      >
-                        <polyline points="20 6 9 17 4 12" />
-                      </svg>
-                    </div>
-                    <span className="text-white/80 group-hover:text-white transition-colors">
-                      {token}
-                    </span>
-                  </label>
-                ))}
-              </div>
-
-              {!anyTokenSelected && (
-                <p className="text-[11px] text-[#ef4444] mt-1">
-                  Select at least one token
-                </p>
+              {parsedAmount > balance && balance > 0 && (
+                <p className="text-[11px] text-red-400">Exceeds your aUSD balance</p>
               )}
             </div>
 
-            {/* Submit Button */}
-            <div className="pt-2">
-              <button
-                type="submit"
-                disabled={isSubmitDisabled}
-                className={`w-full bg-white hover:bg-neutral-200 text-black font-semibold text-sm rounded-full py-3 transition-colors duration-200 cursor-pointer ${
-                  isSubmitDisabled ? 'opacity-40 cursor-not-allowed hover:bg-white' : ''
-                }`}
-              >
-                Create Vault
-              </button>
+            {/* Risk Level */}
+            <div className="space-y-3">
+              <label className="text-[12px] text-white/60 block">Risk Level</label>
+              <div className="flex gap-2">
+                {[1, 2, 3, 4, 5].map((level) => (
+                  <button
+                    type="button"
+                    key={level}
+                    onClick={() => setRiskLevel(level)}
+                    className={`flex-1 py-2.5 rounded-xl border text-[13px] font-light transition-all duration-200 cursor-pointer ${
+                      riskLevel === level
+                        ? 'bg-amber-500/20 border-amber-500/50 text-amber-400'
+                        : 'bg-white/[0.03] border-white/10 text-white/50 hover:border-white/20 hover:text-white'
+                    }`}
+                  >
+                    {level}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-amber-500/80">{RISK_DESCRIPTIONS[riskLevel]}</p>
             </div>
 
-            <p className="text-[10px] text-white/30 text-center leading-normal">
-              Your aUSD will be locked in a smart contract on Somnia Testnet (chain 50312).
+            {/* Token Allowlist */}
+            <div className="space-y-3 pt-1">
+              <div>
+                <label className="text-[12px] text-white/60 block">Allowed Tokens</label>
+                <p className="text-[11px] text-white/30">This vault will only copy trades for selected tokens</p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                {['WSOMI', 'USDC.e', 'WETH', 'WBTC'].map((token) => (
+                  <label key={token} className="flex items-center gap-3 cursor-pointer group text-[13px] select-none">
+                    <input type="checkbox" checked={tokens[token] || false} onChange={() => toggleToken(token)} className="sr-only" />
+                    <div className={`w-4.5 h-4.5 w-[18px] h-[18px] rounded border flex items-center justify-center flex-shrink-0 transition-all ${
+                      tokens[token]
+                        ? 'border-amber-500 bg-amber-500/10 text-amber-500'
+                        : 'border-white/10 bg-white/[0.02] group-hover:border-white/30 text-transparent'
+                    }`}>
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className="w-3 h-3">
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    </div>
+                    <span className="text-white/70 group-hover:text-white transition-colors">{token}</span>
+                  </label>
+                ))}
+              </div>
+              {selectedTokens.length === 0 && (
+                <p className="text-[11px] text-red-400">Select at least one token</p>
+              )}
+            </div>
+
+            {/* Error */}
+            {submitErr && (
+              <p className="text-[12px] text-red-400 bg-red-400/5 border border-red-400/20 rounded-xl px-4 py-3 break-all">
+                {submitErr}
+              </p>
+            )}
+
+            {/* Submit */}
+            {isConnected ? (
+              <button
+                type="submit"
+                disabled={!canSubmit || submitting || createPending}
+                className={`w-full rounded-full py-3 text-[14px] font-light tracking-wide transition-all duration-200 cursor-pointer ${
+                  canSubmit && !submitting && !createPending
+                    ? 'bg-white text-black hover:bg-neutral-200'
+                    : 'bg-white/10 text-white/30 cursor-not-allowed'
+                }`}
+              >
+                {submitting || createPending ? 'Confirm in wallet…' : 'Create Vault'}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={login}
+                className="w-full rounded-full border border-white/[0.18] bg-white/[0.03] text-white/90 text-[14px] font-light py-3 hover:bg-white/[0.08] hover:border-white/40 transition-all duration-300 cursor-pointer"
+              >
+                Connect Wallet
+              </button>
+            )}
+
+            <p className="text-[10px] text-white/20 text-center leading-normal">
+              aUSD is locked in a smart contract on Somnia Testnet (chain 50312). A keeper will execute copy trades on your behalf.
             </p>
           </form>
         </div>

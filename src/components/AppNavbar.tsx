@@ -29,7 +29,7 @@ export default function AppNavbar() {
   const pathname = usePathname();
 
   return (
-    <nav className="fixed top-0 left-0 right-0 z-50 h-16 flex items-center justify-between px-6 md:px-16 bg-black border-b border-white/[0.06] select-none">
+    <nav className="fixed top-0 left-0 right-0 z-50 h-[72px] flex items-center justify-between px-6 md:px-16 bg-black border-b border-white/[0.04] select-none">
       <Link href="/" className="flex items-center gap-2 group cursor-pointer">
         <div className="text-white/95 group-hover:rotate-45 transition-transform duration-500 ease-out">
           <LogoIcon />
