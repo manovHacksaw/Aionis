@@ -29,21 +29,29 @@
 
 ## Infrastructure
 
-- **ngrok**: `https://garnish-hardcopy-annotate.ngrok-free.dev` → `http://localhost:3000`
+- **ngrok**: `https://garnish-hardcopy-annotate.ngrok-free.dev` → `http://localhost:3001`
 - **API_BASE on contract**: `https://garnish-hardcopy-annotate.ngrok-free.dev/api/agent/leader/`
 - **PRICE_API_BASE on contract**: `https://garnish-hardcopy-annotate.ngrok-free.dev/api/price/`
-- **Root app (API routes)**: `localhost:3000` — runs from project root `src/` (whichever of root/frontend starts FIRST grabs 3000 — check with `lsof -nP -iTCP -sTCP:LISTEN | grep 300`)
-- **Frontend (UI)**: `localhost:3001` — runs from `frontend/` directory
+- **Frontend (UI)**: `localhost:3000` — runs from `frontend/` directory (Privy is configured
+  for this origin only — its CSP is `frame-ancestors 'self' http://localhost:3000 ...`,
+  so auth 403s with "Origin not allowed" if frontend lands on any other port)
+- **Root app (API routes)**: `localhost:3001` — runs from project root `src/`. Frontend's
+  `next.config.ts` has a hardcoded rewrite `'/api/:path*' → 'http://localhost:3001/api/:path*'`
+  that proxies all `/api/*` calls there.
 - **Watcher**: `watcher/src/index.ts`
 
 > **Critical #1**: Next.js 16 in `frontend/` detects monorepo root at `/somnia/` and reads
 > env from **root `.env.local`**, NOT `frontend/.env.local`. Always update the root file.
 >
-> **Critical #2**: Port assignment is a RACE — whichever of the root app / frontend starts
-> first grabs `:3000`, the other gets `:3001`. ngrok must point at whichever one is
-> serving `/api/agent/leader/...` (the root app with `src/app/api/`). Verify with:
-> `curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/api/agent/leader/<addr>/latest-swap`
-> (200 = API routes are here) before pointing/repointing ngrok.
+> **Critical #2 — START FRONTEND FIRST**: port assignment is a race for `:3000`. Frontend
+> MUST win it (Privy + the `next.config.ts` rewrite both hardcode this convention). Always:
+> 1. `cd frontend && npm run dev` (claims `:3000`)
+> 2. *then* `cd <root> && npm run dev` (falls back to `:3001`)
+> 3. point ngrok at `:3001`
+> If you ever see Privy throw "Origin not allowed" / 403, or `/api/traders/...` 500 in a
+> loop, the ports are flipped — kill both and restart in the order above. Sanity check:
+> `curl -s -o /dev/null -w "%{http_code}" http://localhost:3001/api/agent/leader/<addr>/latest-swap`
+> should return `200` directly from the root app (not proxied).
 
 ---
 
@@ -116,44 +124,52 @@ since the old contract's dead vault record couldn't be reset without the new fun
 Ran `setApiBase.ts` → same ngrok URL. Updated all 3 env files. Wiped the stale `UserVault`
 + `Position` rows from the DB (`deleteMany({})`).
 
-**Bonus catch**: this time the root app raced frontend for port 3000 and won — root landed
-on `:3000`, frontend on `:3001` (reversed from before). ngrok was still pointed at `:3001`
-(now frontend, no API routes → would have silently broken the pipeline again). Repointed
-ngrok to `:3000` and verified end-to-end: `curl https://garnish-hardcopy-annotate.ngrok-free.dev/api/agent/leader/.../latest-swap` → `200`.
+**Bonus catch (and its correction)**: first restart attempt let the root app win `:3000`
+(frontend got `:3001`). That looked plausible — both serve `200` thanks to frontend's
+`next.config.ts` rewrite — but it silently broke two things: (1) Privy's CSP only allows
+`frame-ancestors http://localhost:3000`, so auth threw 403 "Origin not allowed" with
+frontend on `:3001`, and (2) the rewrite hardcodes `destination: 'http://localhost:3001/api/:path*'`,
+so with frontend ALSO on `:3001` it proxied `/api/*` back to itself → infinite loop → 500s
+on `/api/traders/leaderboard`. **Correct convention is frontend=`:3000`, root=`:3001`**
+(restored — see Infrastructure section above). Killed both, restarted frontend first,
+confirmed via `lsof` (frontend PID on `:3000`, root `somnia@0.1.0` PID on `:3001`),
+repointed ngrok back to `:3001`, re-verified tunnel → `200`.
 
 **Keeper balance checked**: `0x842056...` now has `2.19 STT` — comfortably above the
 `0.4 STT` needed per `checkLeaderActivity` call (got refunded/topped up since last night's `0.19`).
 
 ### Next action
-Create a fresh vault for `(0xfd3495..., 0xc3ef32...)` through the frontend UI — the new
-contract has no record for this pair (`follower == address(0)` passes), so plain
-`createVault` works normally. `reopenVault` is now there as a safety net if this one ever
-gets closed too. **Remember the frontend UI is now on `:3001`, not `:3000`.**
+Open the frontend at **`localhost:3000`** and create a fresh vault for
+`(0xfd3495..., 0xc3ef32...)` — the new contract has no record for this pair
+(`follower == address(0)` passes), so plain `createVault` works normally. `reopenVault`
+is now there as a safety net if this one ever gets closed too.
 
 ---
 
 ## How to Resume
 
 ```bash
-# 1. Start root API + frontend (whichever runs first grabs :3000)
-cd /Users/manobendramandal/Desktop/code/projects/somnia && npm run dev &
+# 1. Start frontend FIRST so it claims :3000 (Privy + next.config.ts rewrite require this)
 cd /Users/manobendramandal/Desktop/code/projects/somnia/frontend && npm run dev &
+sleep 6
+# 2. Then root app — it'll fall back to :3001
+cd /Users/manobendramandal/Desktop/code/projects/somnia && npm run dev &
 
-# 2. Start watcher
+# 3. Start watcher
 cd /Users/manobendramandal/Desktop/code/projects/somnia/watcher && npm run dev &
 
-# 3. Figure out which port has the API routes (DON'T assume — it flips):
-curl -s -o /dev/null -w "%{http_code}\n" http://localhost:3000/api/agent/leader/0xc3ef32972c265a82efef46097dff1289cbdee72e/latest-swap
+# 4. Sanity check the convention held (root API directly on :3001, not proxied):
 curl -s -o /dev/null -w "%{http_code}\n" http://localhost:3001/api/agent/leader/0xc3ef32972c265a82efef46097dff1289cbdee72e/latest-swap
-# whichever returns 200 is the root app — point ngrok there
+# 200 = correct. If you get errors/loops, ports flipped — kill all `next dev`/`tsx watch`
+# and redo step 1-2 in order.
 
-# 4. Start/repoint ngrok to the root app's port, verify tunnel:
-ngrok http <PORT>
+# 5. ngrok must point at :3001:
+ngrok http 3001
 curl -s -o /dev/null -w "%{http_code}\n" https://garnish-hardcopy-annotate.ngrok-free.dev/api/agent/leader/0xc3ef32972c265a82efef46097dff1289cbdee72e/latest-swap
 # If the ngrok URL changed, re-run:
 # NGROK_URL=https://xxx.ngrok-free.dev npx hardhat run scripts/setApiBase.ts --network somnia
 # (VAULT_MANAGER in setApiBase.ts is currently 0x3672E7703B6A446d2c38878A227ca2f32Fa5d408)
 
-# 5. Open the frontend UI on whichever port did NOT return 200 above,
-#    create a fresh vault for the leader you want to follow, set keeper, fund it, swap.
+# 6. Open http://localhost:3000 — create a fresh vault for the leader you want to
+#    follow, set keeper, fund it, swap.
 ```
